@@ -12,7 +12,7 @@ markerLength = 0.2 #m
 markerSeparation = 0.5 #m
 size = (450,450)
 #import image for analyze
-frame = cv2.imread("test.png")
+frame = cv2.imread("test aruco.png")
 src_corners1 = []
 dst_corners = [(0, 0), (750, 0), (750, 100), (0, 100)] #test
 
