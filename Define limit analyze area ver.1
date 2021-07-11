@@ -1,0 +1,131 @@
+import sys
+import cv2
+import cv2.aruco as aruco
+from size_test1 import *  #from Measure size object by OpenCV: https://pysource.com/2021/05/28/measure-size-of-an-object-with-opencv-aruco-marker-and-python/ 
+import numpy as np
+import seaborn as sns
+import pandas as pd
+import matplotlib.pyplot as plt
+
+#define camera parameter
+matrix_coefficients = [[1.25019753e+03, 0.00000000e+00, 8.31027626e+02,], 
+                       [0.00000000e+00, 1.24629197e+03, 4.93761478e+02,],
+                       [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]]
+distortion_coefficients = [[ 0.22126322, -0.38411381, -0.01361529,  0.03204828, -0.06211731]] #from Iphone SE2020
+
+markerLength = 0.2 #m
+markerSeparation = 0.5 #m 
+
+height = 900 #assume by (2*markerLength+markerSeparation)*1000
+width = 900 #assume by (2*markerLength+markerSeparation)*1000
+dsize = (width, height)
+
+
+#import image for analyze
+frame = cv2.imread("define area.jpg")
+dst_corners = np.float32([[0, 0], [width, 0], [width, height], [0, height]]) #point for adjust the frame
+
+#Part find id and markerpoint
+gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)  # Change grayscale
+aruco_dict = aruco.Dictionary_get(aruco.DICT_4X4_50)  # Use 4x4 dictionary to find markers
+parameters = aruco.DetectorParameters_create()  # Marker detection parameters
+# lists of ids and the corners beloning to each id
+corners, ids, rejected_img_points = aruco.detectMarkers(gray, aruco_dict,
+                                                        parameters=parameters,
+                                                        cameraMatrix=np.float32(matrix_coefficients),
+                                                        distCoeff=np.float32(distortion_coefficients))
+if np.all(ids is not None):  # If there are markers found by detector
+    for i in range(0, len(ids)):  # Iterate in markers
+        # Estimate pose of each marker and return the values rvec and tvec---different from camera coefficients
+        rvec, tvec, markerPoints = aruco.estimatePoseSingleMarkers(corners[i], markerLength,
+                                                                   np.float32(matrix_coefficients),
+                                                                   np.float32(distortion_coefficients))
+
+        (rvec - tvec).any()  # get rid of that nasty numpy value array error
+        markerpst = corners[i].copy()
+        markerpst = corners[i].reshape((4,2))
+        (topLeft, topRight, bottomRight, bottomLeft) = markerpst
+        # convert each of the (x, y)-coordinate pairs to integers
+        topRight = (int(topRight[0]), int(topRight[1]))
+        bottomRight = (int(bottomRight[0]), int(bottomRight[1]))
+        bottomLeft = (int(bottomLeft[0]), int(bottomLeft[1]))
+        topLeft = (int(topLeft[0]), int(topLeft[1]))
+        #for define new point to use in function cv2.getPerspectiveTransform() 
+        if ids[i] == 8:
+            markerpst1 = topLeft    
+        if ids[i] == 47:
+            markerpst4 = bottomLeft
+        if ids[i] == 18:
+            markerpst3 = bottomRight
+        if ids[i] == 14:
+            markerpst2 = topRight
+src_corners = np.float32([[markerpst1], [markerpst2], [markerpst3], [markerpst4]]) #This is a point to use in function cv2.getPerspectiveTransform() 
+
+#get Perspectivetransform
+dstimg = frame.copy()
+matrix_adjust = cv2.getPerspectiveTransform((src_corners), (dst_corners))
+result = cv2.warpPerspective(dstimg, matrix_adjust, dsize)
+
+#Part analyze aruco marker and find grain size
+grain_size_dist=np.array([])
+# Load Aruco detector
+parameters = cv2.aruco.DetectorParameters_create()
+aruco_dict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_5X5_50)
+
+
+# Load Object Detector
+detector = HomogeneousBgDetector()
+
+#Load frame
+frame = result
+#analyze the frame
+gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)  # Change grayscale
+
+aruco_dict = aruco.Dictionary_get(aruco.DICT_4X4_50)  # Use 5x5 dictionary to find markers
+parameters = aruco.DetectorParameters_create()  # Marker detection parameters
+# lists of ids and the corners beloning to each id
+corners, ids, rejected_img_points = aruco.detectMarkers(gray, aruco_dict,
+                                                        parameters=parameters,
+                                                        cameraMatrix=np.float32(matrix_coefficients),
+                                                        distCoeff=np.float32(distortion_coefficients))
+#when mareker aruco id more than 1 id 
+if len(corners) >= 0:
+    corner_aruco = corners[0]
+    cv2.polylines(frame, np.int0(corner_aruco), True, (0, 255, 0), 5)
+    # Aruco Perimeter
+    aruco_perimeter = cv2.arcLength(corner_aruco, True)
+    # Pixel to cm ratio
+    pixel_cm_ratio = aruco_perimeter / 20
+
+    contours = detector.detect_objects(frame)
+
+    # Draw objects boundaries
+    for cnt in contours:
+        # Get rect
+        rect = cv2.minAreaRect(cnt)
+        (x, y), (w, h), angle = rect
+
+        # Get Width and Height of the Objects by applying the Ratio pixel to cm
+        object_width = w / pixel_cm_ratio
+        object_height = h / pixel_cm_ratio
+        object_size=(w+h)/2
+        grain_size_dist=np.append(grain_size_dist,object_size)
+
+    # Display rectangle
+    box = cv2.boxPoints(rect)
+    box = np.int0(box)
+    cv2.circle(frame, (int(x), int(y)), 5, (0, 0, 255), -1)
+    cv2.polylines(frame, [box], True, (255, 0, 0), 2)
+    cv2.putText(frame, "Width {} cm".format(round(object_width, 1)), (int(x - 100), int(y - 20)), cv2.FONT_HERSHEY_PLAIN, 2, (100, 200, 0), 2)
+    cv2.putText(frame, "Height {} cm".format(round(object_height, 1)), (int(x - 100), int(y + 15)), cv2.FONT_HERSHEY_PLAIN, 2, (100, 200, 0), 2)
+cv2.imshow("Image", frame)
+cv2.waitKey(0)
+cv2.destroyAllWindows()
+    
+print(grain_size_dist)
+
+df = pd.DataFrame(grain_size_dist, columns=["grain_size"])
+
+#sns.displot(df, x="grain_size")
+sns.ecdfplot(df, x="grain_size")
+plt.show()
